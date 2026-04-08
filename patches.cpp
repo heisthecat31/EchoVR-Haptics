@@ -6,55 +6,31 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <map>
 
 #pragma comment(lib, "detours.lib")
 
 float g_HapticStrength = 1.4f;   
-float g_FovMultiplier  = 1.0f; // 1.0 = Default, 1.2 = Wider
-
-// Helper to clean strings
-std::string Trim(const std::string& str) {
-    size_t first = str.find_first_not_of(" \t\r\n");
-    if (std::string::npos == first) return str;
-    size_t last = str.find_last_not_of(" \t\r\n");
-    return str.substr(first, (last - first + 1));
-}
-
-void LoadConfig() {
-    std::ifstream file("haptics_config.txt");
-    if (!file.is_open()) return;
-
-    std::string line;
-    while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#' || line[0] == '/') continue;
-
-        std::istringstream is_line(line);
-        std::string key;
-        if (std::getline(is_line, key, '=')) {
-            std::string value;
-            if (std::getline(is_line, value)) {
-                key = Trim(key);
-                value = Trim(value);
-
-                if (key == "HapticStrength") g_HapticStrength = std::stof(value);
-                else if (key == "FovMultiplier") g_FovMultiplier = std::stof(value);
-            }
-        }
-    }
-    // Safety Clamps
-    if (g_HapticStrength > 5.0f) g_HapticStrength = 5.0f;
-    if (g_FovMultiplier < 0.1f) g_FovMultiplier = 1.0f; 
-}
+float g_FovMultiplier  = 1.0f; 
 
 // =============================================================
-// OVR STRUCTS EXACTLY MATCHING OVR_CAPI.H
+// OVR CONSTANTS & STRUCTURES
 // =============================================================
+const unsigned int OVR_BUTTON_A         = 0x00000001;
+const unsigned int OVR_BUTTON_B         = 0x00000002;
+const unsigned int OVR_BUTTON_RTHUMB    = 0x00000004;
+const unsigned int OVR_BUTTON_RSHOULDER = 0x00000008;
+const unsigned int OVR_BUTTON_X         = 0x00000100;
+const unsigned int OVR_BUTTON_Y         = 0x00000200;
+const unsigned int OVR_BUTTON_LTHUMB    = 0x00000400;
+const unsigned int OVR_BUTTON_LSHOULDER = 0x00000800;
+const unsigned int OVR_BUTTON_ENTER     = 0x00100000; 
+
 typedef int ovrResult;
 typedef void* ovrSession;
 typedef int ovrControllerType;
 typedef int ovrHmdType; 
 
-// Basic Math
 struct ovrVector2f { float x, y; };
 struct ovrSizei { int w, h; };
 struct ovrFovPort { float UpTan; float DownTan; float LeftTan; float RightTan; };
@@ -67,8 +43,7 @@ struct ovrHapticsBuffer {
 
 struct ovrHmdDesc {
     ovrHmdType Type;
-    char _pad0[4]; //(4 bytes)
-    
+    char _pad0[4]; 
     char ProductName[64];
     char Manufacturer[64];
     short VendorId;
@@ -80,19 +55,13 @@ struct ovrHmdDesc {
     unsigned int DefaultHmdCaps;
     unsigned int AvailableTrackingCaps;
     unsigned int DefaultTrackingCaps;
-    
     ovrFovPort DefaultEyeFov[2];
     ovrFovPort MaxEyeFov[2];
     ovrSizei Resolution;
     float DisplayRefreshRate;
-    
-    char _pad1[4]; // (4 bytes)
+    char _pad1[4]; 
 };
 
-// -------------------------------------------------------------
-// ovrInputState
-// Based on OVR_CAPI.h from 2017 version sdk
-// -------------------------------------------------------------
 struct ovrInputState {
     double TimeInSeconds;
     unsigned int Buttons;
@@ -112,18 +81,89 @@ struct ovrInputState {
 typedef ovrResult(__cdecl* pf_SetControllerVibration)(ovrSession, ovrControllerType, float, float);
 typedef ovrResult(__cdecl* pf_SubmitControllerVibration)(ovrSession, ovrControllerType, const ovrHapticsBuffer*);
 typedef ovrHmdDesc(__cdecl* pf_GetHmdDesc)(ovrSession);
+typedef ovrResult(__cdecl* pf_GetInputState)(ovrSession, ovrControllerType, ovrInputState*);
 
 pf_SetControllerVibration Real_SetControllerVibration = nullptr;
 pf_SubmitControllerVibration Real_SubmitControllerVibration = nullptr;
 pf_GetHmdDesc Real_GetHmdDesc = nullptr;
+pf_GetInputState Real_GetInputState = nullptr;
+
+// =============================================================
+// CONFIGURATION
+// =============================================================
+std::map<unsigned int, unsigned int> g_ButtonMappings;
+std::map<int, int> g_AnalogMappings; 
+
+std::string Trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\r\n");
+    if (std::string::npos == first) return str;
+    size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
+}
+
+unsigned int StringToButton(const std::string& name) {
+    if (name == "A") return OVR_BUTTON_A;
+    if (name == "B") return OVR_BUTTON_B;
+    if (name == "X") return OVR_BUTTON_X;
+    if (name == "Y") return OVR_BUTTON_Y;
+    if (name == "LStick") return OVR_BUTTON_LTHUMB;
+    if (name == "RStick") return OVR_BUTTON_RTHUMB;
+    if (name == "Menu") return OVR_BUTTON_ENTER;
+    if (name == "LGrip_Btn") return OVR_BUTTON_LSHOULDER;
+    if (name == "RGrip_Btn") return OVR_BUTTON_RSHOULDER;
+    return 0;
+}
+
+int StringToAnalog(const std::string& name) {
+    if (name == "LTrigger") return 0;
+    if (name == "RTrigger") return 1;
+    if (name == "LGrip") return 2;
+    if (name == "RGrip") return 3;
+    return -1;
+}
+
+void LoadConfig() {
+    g_ButtonMappings.clear();
+    g_AnalogMappings.clear();
+    std::ifstream file("haptics_config.txt");
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#' || line[0] == '/') continue;
+        std::istringstream is_line(line);
+        std::string key;
+        if (std::getline(is_line, key, '=')) {
+            std::string value;
+            if (std::getline(is_line, value)) {
+                key = Trim(key);
+                value = Trim(value);
+                if (key == "HapticStrength") g_HapticStrength = std::stof(value);
+                else if (key == "FovMultiplier") g_FovMultiplier = std::stof(value);
+                else if (key.find("Map_") == 0) {
+                    std::string btnName = key.substr(4);
+                    int fromA = StringToAnalog(btnName);
+                    int toA = StringToAnalog(value);
+                    if (fromA != -1 && toA != -1) {
+                        g_AnalogMappings[fromA] = toA;
+                        continue;
+                    }
+                    unsigned int fromB = StringToButton(btnName);
+                    unsigned int toB = StringToButton(value);
+                    if (fromB != 0 && toB != 0) g_ButtonMappings[fromB] = toB;
+                }
+            }
+        }
+    }
+    if (g_HapticStrength > 5.0f) g_HapticStrength = 5.0f;
+    if (g_FovMultiplier < 0.1f) g_FovMultiplier = 1.0f; 
+}
 
 // =============================================================
 // HOOKS
 // =============================================================
 
-// 1. HAPTICS MOD
 ovrResult __cdecl Hooked_SubmitControllerVibration(ovrSession session, ovrControllerType type, const ovrHapticsBuffer* buffer) {
-    // Lazy load the real function if missing
     if (!Real_SetControllerVibration) {
         HMODULE h = GetModuleHandleA("LibOVRRT64_1.dll");
         if (h) Real_SetControllerVibration = (pf_SetControllerVibration)GetProcAddress(h, "ovr_SetControllerVibration");
@@ -132,33 +172,24 @@ ovrResult __cdecl Hooked_SubmitControllerVibration(ovrSession session, ovrContro
 
     bool shouldVibrate = false;
     float finalAmplitude = 0.0f;
-
-    // Analyze the buffer intensity
     if (buffer && buffer->SamplesCount > 0) {
         const unsigned char* samples = (const unsigned char*)buffer->Samples;
         long total = 0;
         for (int i = 0; i < buffer->SamplesCount; i++) total += samples[i];
         float amp = ((float)total / buffer->SamplesCount) / 255.0f; 
-
         if (amp > 0.01f) { 
             shouldVibrate = true;
             finalAmplitude = amp * g_HapticStrength;
             if (finalAmplitude > 1.0f) finalAmplitude = 1.0f;
         }
     }
-
     if (shouldVibrate) Real_SetControllerVibration(session, type, 1.0f, finalAmplitude);
     else Real_SetControllerVibration(session, type, 0.0f, 0.0f);
-
     return 0; 
 }
 
-// 2. FOV MOD
 ovrHmdDesc __cdecl Hooked_GetHmdDesc(ovrSession session) {
-    // Get the real hardware data
     ovrHmdDesc desc = Real_GetHmdDesc(session);
-
-    // Modify the tangent angles if multiplier is active
     if (g_FovMultiplier != 1.0f) {
         for (int i = 0; i < 2; ++i) {
             desc.DefaultEyeFov[i].UpTan    *= g_FovMultiplier;
@@ -170,28 +201,65 @@ ovrHmdDesc __cdecl Hooked_GetHmdDesc(ovrSession session) {
     return desc;
 }
 
+ovrResult __cdecl Hooked_GetInputState(ovrSession session, ovrControllerType controllerType, ovrInputState* inputState) {
+    ovrResult result = Real_GetInputState(session, controllerType, inputState);
+    if (result >= 0 && inputState) {
+        if (!g_ButtonMappings.empty()) {
+            unsigned int originalButtons = inputState->Buttons;
+            unsigned int buttonsToIgnore = 0;
+            unsigned int buttonsToAdd = 0;
+            for (std::map<unsigned int, unsigned int>::iterator it = g_ButtonMappings.begin(); it != g_ButtonMappings.end(); ++it) {
+                unsigned int from = it->first;
+                unsigned int to = it->second;
+                if (originalButtons & from) {
+                    buttonsToIgnore |= from;
+                    buttonsToAdd |= to;
+                }
+            }
+            inputState->Buttons = (originalButtons & ~buttonsToIgnore) | buttonsToAdd;
+        }
+        if (!g_AnalogMappings.empty()) {
+            float origTrig[2] = {inputState->IndexTrigger[0], inputState->IndexTrigger[1]};
+            float origGrip[2] = {inputState->HandTrigger[0], inputState->HandTrigger[1]};
+            auto GetOrig = [&](int id) {
+                if (id == 0) return origTrig[0];
+                if (id == 1) return origTrig[1];
+                if (id == 2) return origGrip[0];
+                if (id == 3) return origGrip[1];
+                return 0.0f;
+            };
+            for (std::map<int, int>::iterator it = g_AnalogMappings.begin(); it != g_AnalogMappings.end(); ++it) {
+                int from = it->first;
+                int to = it->second;
+                float val = GetOrig(to);
+                if (from == 0) inputState->IndexTrigger[0] = val;
+                else if (from == 1) inputState->IndexTrigger[1] = val;
+                else if (from == 2) inputState->HandTrigger[0] = val;
+                else if (from == 3) inputState->HandTrigger[1] = val;
+            }
+        }
+    }
+    return result;
+}
+
 void InstallHooks() {
     LoadConfig();
-
     HMODULE hLibOVR = nullptr;
     int attempts = 0;
-    // Fast loop to catch OVR initialization early
     while (!hLibOVR && attempts < 500) {
         hLibOVR = GetModuleHandleA("LibOVRRT64_1.dll");
         if(!hLibOVR) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         attempts++;
     }
-
     if (hLibOVR) {
         Real_SubmitControllerVibration = (pf_SubmitControllerVibration)GetProcAddress(hLibOVR, "ovr_SubmitControllerVibration");
         Real_GetHmdDesc = (pf_GetHmdDesc)GetProcAddress(hLibOVR, "ovr_GetHmdDesc");
-
+        Real_GetInputState = (pf_GetInputState)GetProcAddress(hLibOVR, "ovr_GetInputState");
         DetourTransactionBegin();
         DetourUpdateThread(GetCurrentThread());
-
         if (Real_SubmitControllerVibration) DetourAttach(&(PVOID&)Real_SubmitControllerVibration, Hooked_SubmitControllerVibration);
         if (Real_GetHmdDesc) DetourAttach(&(PVOID&)Real_GetHmdDesc, Hooked_GetHmdDesc);
-
+        if (Real_GetInputState) DetourAttach(&(PVOID&)Real_GetInputState, Hooked_GetInputState);
         DetourTransactionCommit();
     }
 }

@@ -1,0 +1,9 @@
+﻿J:\vs2026\MSBuild\Microsoft\VC\v180\Microsoft.CppBuild.targets(1139,5): warning MSB8027: Two or more files with the name of dllmain.cpp will produce outputs to the same location. This can lead to an incorrect build result.  The files involved are ..\..\dllmain.cpp, dllmain.cpp.
+  patches.cpp
+x64\Release\dllmain.obj : warning LNK4042: object specified more than once; extras ignored
+     Creating library C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.lib and object C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.exp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 686 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  EchoVR-Haptics.vcxproj -> C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.dll
