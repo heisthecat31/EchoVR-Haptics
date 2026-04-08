@@ -93,6 +93,8 @@ pf_GetInputState Real_GetInputState = nullptr;
 // =============================================================
 std::map<unsigned int, unsigned int> g_ButtonMappings;
 std::map<int, int> g_AnalogMappings; 
+std::map<int, int> g_StickMappings;
+int g_StickRemapMode = 0; // 0=Both, 1=TurningOnly, 2=ButtonsOnly
 
 std::string Trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\r\n");
@@ -122,6 +124,12 @@ int StringToAnalog(const std::string& name) {
     return -1;
 }
 
+int StringToStick(const std::string& name) {
+    if (name == "LStick") return 0;
+    if (name == "RStick") return 1;
+    return -1;
+}
+
 void LoadConfig() {
     g_ButtonMappings.clear();
     g_AnalogMappings.clear();
@@ -140,17 +148,43 @@ void LoadConfig() {
                 value = Trim(value);
                 if (key == "HapticStrength") g_HapticStrength = std::stof(value);
                 else if (key == "FovMultiplier") g_FovMultiplier = std::stof(value);
+                else if (key == "StickRemapMode") g_StickRemapMode = std::stoi(value);
                 else if (key.find("Map_") == 0) {
                     std::string btnName = key.substr(4);
+                    
+                    // Analog (Triggers/Grips)
                     int fromA = StringToAnalog(btnName);
                     int toA = StringToAnalog(value);
                     if (fromA != -1 && toA != -1) {
                         g_AnalogMappings[fromA] = toA;
                         continue;
                     }
+
+                    // Stick Analog
+                    int fromS = StringToStick(btnName);
+                    int toS = StringToStick(value);
+                    if (fromS != -1 && toS != -1) {
+                        if (g_StickRemapMode == 0 || g_StickRemapMode == 1) {
+                            g_StickMappings[fromS] = toS;
+                        }
+                        if (g_StickRemapMode == 1) continue; // Only turning, skip button map
+                    }
+                    
+                    // Buttons (including Stick Click)
+                    if (g_StickRemapMode == 1 && fromS != -1) continue; // Turning Only mode, don't map stick buttons
+
                     unsigned int fromB = StringToButton(btnName);
                     unsigned int toB = StringToButton(value);
-                    if (fromB != 0 && toB != 0) g_ButtonMappings[fromB] = toB;
+                    if (fromB != 0 && toB != 0) {
+                        // If it's a stick button, check if we should map it
+                        if (fromS != -1) {
+                            if (g_StickRemapMode == 0 || g_StickRemapMode == 2) {
+                                g_ButtonMappings[fromB] = toB;
+                            }
+                        } else {
+                            g_ButtonMappings[fromB] = toB;
+                        }
+                    }
                 }
             }
         }
@@ -236,6 +270,19 @@ ovrResult __cdecl Hooked_GetInputState(ovrSession session, ovrControllerType con
                 else if (from == 1) inputState->IndexTrigger[1] = val;
                 else if (from == 2) inputState->HandTrigger[0] = val;
                 else if (from == 3) inputState->HandTrigger[1] = val;
+            }
+        }
+        if (!g_StickMappings.empty()) {
+            ovrVector2f origStick[2] = { inputState->Thumbstick[0], inputState->Thumbstick[1] };
+            ovrVector2f origStickND[2] = { inputState->ThumbstickNoDeadzone[0], inputState->ThumbstickNoDeadzone[1] };
+            ovrVector2f origStickRaw[2] = { inputState->ThumbstickRaw[0], inputState->ThumbstickRaw[1] };
+
+            for (std::map<int, int>::iterator it = g_StickMappings.begin(); it != g_StickMappings.end(); ++it) {
+                int from = it->first;
+                int to = it->second;
+                inputState->Thumbstick[from] = origStick[to];
+                inputState->ThumbstickNoDeadzone[from] = origStickND[to];
+                inputState->ThumbstickRaw[from] = origStickRaw[to];
             }
         }
     }

@@ -32,7 +32,7 @@ class VisualConfigurator:
     def __init__(self, root):
         self.root = root
         self.root.title("EchoVR Support Modding Tool")
-        self.root.geometry("850x750")
+        self.root.geometry("850x800")
         self.root.configure(bg=COLORS["bg"])
         
         if os.path.exists("george.ico"):
@@ -42,6 +42,7 @@ class VisualConfigurator:
         
         self.haptic_val = tk.DoubleVar(value=1.4)
         self.fov_val = tk.DoubleVar(value=1.0)
+        self.stick_mode = tk.StringVar(value="0")
         
         self.mappings = {name: tk.StringVar(value=name) for name in ALL_MAPPABLE}
         
@@ -116,6 +117,7 @@ class VisualConfigurator:
                         key, val = [x.strip() for x in line.split("=", 1)]
                         if key == "HapticStrength": self.haptic_val.set(float(val))
                         elif key == "FovMultiplier": self.fov_val.set(float(val))
+                        elif key == "StickRemapMode": self.stick_mode.set(val)
                         elif key.startswith("Map_"):
                             btn = key[4:]
                             if btn in self.mappings:
@@ -128,6 +130,7 @@ class VisualConfigurator:
                 "# EchoVR Haptics & FOV Mod Config\n",
                 f"HapticStrength = {self.haptic_val.get():.2f}\n",
                 f"FovMultiplier = {self.fov_val.get():.2f}\n",
+                f"StickRemapMode = {self.stick_mode.get()}\n",
                 "\n# Button & Analog Mappings\n"
             ]
             for name, var in self.mappings.items():
@@ -206,6 +209,19 @@ class VisualConfigurator:
         tk.Label(f_frame, text="FOV MULTIPLIER", fg=COLORS["dim_text"], bg=COLORS["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         tk.Scale(f_frame, from_=0.5, to=2.0, resolution=0.05, orient="horizontal", variable=self.fov_val,
                  bg=COLORS["bg"], fg=COLORS["text"], highlightthickness=0, troughcolor=COLORS["border"]).pack(fill="x")
+
+        # Stick Remap Mode
+        s_frame = tk.Frame(self.root, bg=COLORS["card"], bd=1, highlightbackground=COLORS["border"], padx=20, pady=10)
+        s_frame.pack(fill="x", padx=40, pady=10)
+        
+        tk.Label(s_frame, text="STICK REMAP MODE", font=("Segoe UI", 10, "bold"), fg=COLORS["accent_cyan"], bg=COLORS["card"]).pack(side="left")
+        
+        modes = [("Both", "0"), ("Turning Only", "1"), ("Buttons Only", "2")]
+        for text, val in modes:
+            tk.Radiobutton(s_frame, text=text, variable=self.stick_mode, value=val, 
+                           bg=COLORS["card"], fg=COLORS["text"], selectcolor=COLORS["border"],
+                           activebackground=COLORS["card"], activeforeground=COLORS["accent_cyan"],
+                           font=("Segoe UI", 9)).pack(side="left", padx=15)
 
         # Save Button
         save_btn = tk.Button(self.root, text="SAVE ALL CHANGES", font=("Segoe UI", 12, "bold"), 
