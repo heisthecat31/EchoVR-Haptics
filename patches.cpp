@@ -6,7 +6,8 @@
 #include <fstream>
 #include <string>
 #include <sstream>
-#include <map>
+#include <vector>
+#include <algorithm>
 
 #pragma comment(lib, "detours.lib")
 
@@ -25,6 +26,9 @@ const unsigned int OVR_BUTTON_Y         = 0x00000200;
 const unsigned int OVR_BUTTON_LTHUMB    = 0x00000400;
 const unsigned int OVR_BUTTON_LSHOULDER = 0x00000800;
 const unsigned int OVR_BUTTON_ENTER     = 0x00100000; 
+const int ovrControllerType_LTouch = 0x0001;
+const int ovrControllerType_RTouch = 0x0002;
+const int ovrControllerType_Touch  = 0x0003;
 
 typedef int ovrResult;
 typedef void* ovrSession;
@@ -91,9 +95,13 @@ pf_GetInputState Real_GetInputState = nullptr;
 // =============================================================
 // CONFIGURATION
 // =============================================================
-std::map<unsigned int, unsigned int> g_ButtonMappings;
-std::map<int, int> g_AnalogMappings; 
-std::map<int, int> g_StickMappings;
+struct ButtonMapping { unsigned int source; unsigned int target; };
+struct AnalogMapping { int source; int target; };
+struct StickMapping  { int source; int target; };
+
+std::vector<ButtonMapping> g_ButtonMappings;
+std::vector<AnalogMapping> g_AnalogMappings; 
+std::vector<StickMapping>  g_StickMappings;
 int g_StickRemapMode = 0; // 0=Both, 1=TurningOnly, 2=ButtonsOnly
 
 std::string Trim(const std::string& str) {
@@ -133,6 +141,7 @@ int StringToStick(const std::string& name) {
 void LoadConfig() {
     g_ButtonMappings.clear();
     g_AnalogMappings.clear();
+    g_StickMappings.clear();
     std::ifstream file("haptics_config.txt");
     if (!file.is_open()) return;
 
@@ -153,36 +162,34 @@ void LoadConfig() {
                     std::string btnName = key.substr(4);
                     
                     // Analog (Triggers/Grips)
-                    int fromA = StringToAnalog(btnName);
-                    int toA = StringToAnalog(value);
-                    if (fromA != -1 && toA != -1) {
-                        g_AnalogMappings[fromA] = toA;
+                    int sourceA = StringToAnalog(btnName); // KEY is physical source
+                    int targetA = StringToAnalog(value);   // VALUE is virtual target
+                    if (sourceA != -1 && targetA != -1) {
+                        g_AnalogMappings.push_back({sourceA, targetA});
                         continue;
                     }
 
                     // Stick Analog
-                    int fromS = StringToStick(btnName);
-                    int toS = StringToStick(value);
-                    if (fromS != -1 && toS != -1) {
+                    int sourceS = StringToStick(btnName);
+                    int targetS = StringToStick(value);
+                    if (sourceS != -1 && targetS != -1) {
                         if (g_StickRemapMode == 0 || g_StickRemapMode == 1) {
-                            g_StickMappings[fromS] = toS;
+                            g_StickMappings.push_back({sourceS, targetS});
                         }
                         if (g_StickRemapMode == 1) continue; // Only turning, skip button map
                     }
                     
                     // Buttons (including Stick Click)
-                    if (g_StickRemapMode == 1 && fromS != -1) continue; // Turning Only mode, don't map stick buttons
-
-                    unsigned int fromB = StringToButton(btnName);
-                    unsigned int toB = StringToButton(value);
-                    if (fromB != 0 && toB != 0) {
-                        // If it's a stick button, check if we should map it
-                        if (fromS != -1) {
+                    unsigned int sourceB = StringToButton(btnName);
+                    unsigned int targetB = StringToButton(value);
+                    if (sourceB != 0 && targetB != 0) {
+                        bool isStickBtn = (StringToStick(btnName) != -1);
+                        if (isStickBtn) {
                             if (g_StickRemapMode == 0 || g_StickRemapMode == 2) {
-                                g_ButtonMappings[fromB] = toB;
+                                g_ButtonMappings.push_back({sourceB, targetB});
                             }
                         } else {
-                            g_ButtonMappings[fromB] = toB;
+                            g_ButtonMappings.push_back({sourceB, targetB});
                         }
                     }
                 }
@@ -236,25 +243,35 @@ ovrHmdDesc __cdecl Hooked_GetHmdDesc(ovrSession session) {
 }
 
 ovrResult __cdecl Hooked_GetInputState(ovrSession session, ovrControllerType controllerType, ovrInputState* inputState) {
+    // If we have mappings, we need data from BOTH controllers (Touch) to perform the swap correctly.
+    // LibOVR otherwise only returns data for the specific controller requested.
+    ovrControllerType requestedType = controllerType;
+    if (!g_ButtonMappings.empty() || !g_AnalogMappings.empty() || !g_StickMappings.empty()) {
+        if (controllerType == ovrControllerType_LTouch || controllerType == ovrControllerType_RTouch) {
+            controllerType = ovrControllerType_Touch;
+        }
+    }
+
     ovrResult result = Real_GetInputState(session, controllerType, inputState);
     if (result >= 0 && inputState) {
+        // Restore the original controller type requested by the game
+        inputState->ControllerType = requestedType;
+
         if (!g_ButtonMappings.empty()) {
             unsigned int originalButtons = inputState->Buttons;
-            unsigned int buttonsToIgnore = 0;
-            unsigned int buttonsToAdd = 0;
-            for (std::map<unsigned int, unsigned int>::iterator it = g_ButtonMappings.begin(); it != g_ButtonMappings.end(); ++it) {
-                unsigned int from = it->first;
-                unsigned int to = it->second;
-                if (originalButtons & from) {
-                    buttonsToIgnore |= from;
-                    buttonsToAdd |= to;
-                }
+            unsigned int newButtons = 0;
+            for (const auto& m : g_ButtonMappings) {
+                if (originalButtons & m.source) newButtons |= m.target;
             }
-            inputState->Buttons = (originalButtons & ~buttonsToIgnore) | buttonsToAdd;
+            unsigned int sources = 0;
+            for (const auto& m : g_ButtonMappings) sources |= m.source;
+            inputState->Buttons = (originalButtons & ~sources) | newButtons;
         }
+
         if (!g_AnalogMappings.empty()) {
             float origTrig[2] = {inputState->IndexTrigger[0], inputState->IndexTrigger[1]};
             float origGrip[2] = {inputState->HandTrigger[0], inputState->HandTrigger[1]};
+            float newTrig[2] = {0,0}, newGrip[2] = {0,0};
             auto GetOrig = [&](int id) {
                 if (id == 0) return origTrig[0];
                 if (id == 1) return origTrig[1];
@@ -262,27 +279,43 @@ ovrResult __cdecl Hooked_GetInputState(ovrSession session, ovrControllerType con
                 if (id == 3) return origGrip[1];
                 return 0.0f;
             };
-            for (std::map<int, int>::iterator it = g_AnalogMappings.begin(); it != g_AnalogMappings.end(); ++it) {
-                int from = it->first;
-                int to = it->second;
-                float val = GetOrig(to);
-                if (from == 0) inputState->IndexTrigger[0] = val;
-                else if (from == 1) inputState->IndexTrigger[1] = val;
-                else if (from == 2) inputState->HandTrigger[0] = val;
-                else if (from == 3) inputState->HandTrigger[1] = val;
+
+            for (const auto& m : g_AnalogMappings) {
+                float val = GetOrig(m.source);
+                if (m.target == 0) newTrig[0] = (val > newTrig[0] ? val : newTrig[0]);
+                else if (m.target == 1) newTrig[1] = (val > newTrig[1] ? val : newTrig[1]);
+                else if (m.target == 2) newGrip[0] = (val > newGrip[0] ? val : newGrip[0]);
+                else if (m.target == 3) newGrip[1] = (val > newGrip[1] ? val : newGrip[1]);
+            }
+            
+            for (const auto& m : g_AnalogMappings) {
+                if (m.target == 0) inputState->IndexTrigger[0] = newTrig[0];
+                else if (m.target == 1) inputState->IndexTrigger[1] = newTrig[1];
+                else if (m.target == 2) inputState->HandTrigger[0] = newGrip[0];
+                else if (m.target == 3) inputState->HandTrigger[1] = newGrip[1];
             }
         }
+
         if (!g_StickMappings.empty()) {
             ovrVector2f origStick[2] = { inputState->Thumbstick[0], inputState->Thumbstick[1] };
             ovrVector2f origStickND[2] = { inputState->ThumbstickNoDeadzone[0], inputState->ThumbstickNoDeadzone[1] };
             ovrVector2f origStickRaw[2] = { inputState->ThumbstickRaw[0], inputState->ThumbstickRaw[1] };
+            ovrVector2f newStick[2] = {{0,0},{0,0}}, newStickND[2] = {{0,0},{0,0}}, newStickRaw[2] = {{0,0},{0,0}};
 
-            for (std::map<int, int>::iterator it = g_StickMappings.begin(); it != g_StickMappings.end(); ++it) {
-                int from = it->first;
-                int to = it->second;
-                inputState->Thumbstick[from] = origStick[to];
-                inputState->ThumbstickNoDeadzone[from] = origStickND[to];
-                inputState->ThumbstickRaw[from] = origStickRaw[to];
+            auto GetMagSq = [](const ovrVector2f& v) { return v.x*v.x + v.y*v.y; };
+
+            for (const auto& m : g_StickMappings) {
+                if (GetMagSq(origStick[m.source]) > GetMagSq(newStick[m.target])) {
+                    newStick[m.target] = origStick[m.source];
+                    newStickND[m.target] = origStickND[m.source];
+                    newStickRaw[m.target] = origStickRaw[m.source];
+                }
+            }
+
+            for (const auto& m : g_StickMappings) {
+                inputState->Thumbstick[m.target] = newStick[m.target];
+                inputState->ThumbstickNoDeadzone[m.target] = newStickND[m.target];
+                inputState->ThumbstickRaw[m.target] = newStickRaw[m.target];
             }
         }
     }

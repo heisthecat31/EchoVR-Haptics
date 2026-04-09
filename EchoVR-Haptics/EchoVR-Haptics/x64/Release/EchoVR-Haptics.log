@@ -1,10 +1,9 @@
 ﻿J:\vs2026\MSBuild\Microsoft\VC\v180\Microsoft.CppBuild.targets(1139,5): warning MSB8027: Two or more files with the name of dllmain.cpp will produce outputs to the same location. This can lead to an incorrect build result.  The files involved are ..\..\dllmain.cpp, dllmain.cpp.
   patches.cpp
 x64\Release\dllmain.obj : warning LNK4042: object specified more than once; extras ignored
-     Creating library C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.lib and object C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.exp
   Generating code
-  4 of 690 functions ( 0.6%) were compiled, the rest were copied from previous compilation.
-    2 functions were new in current compilation
-    1 functions had inline decision re-evaluated but remain unchanged
+  43 of 381 functions (11.3%) were compiled, the rest were copied from previous compilation.
+    36 functions were new in current compilation
+    14 functions had inline decision re-evaluated but remain unchanged
   Finished generating code
-  EchoVR-Haptics.vcxproj -> C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.dll
+  EchoVR-Haptics.vcxproj -> J:\EchoVR-Tools-Launcher\EchoVR-Haptics\EchoVR-Haptics\x64\Release\EchoVR-Haptics.dll
