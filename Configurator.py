@@ -1,13 +1,24 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
+import sys
 import json
 import shutil
 from tkinter import filedialog
 
 CONFIG_FILENAME = "haptics_config.txt"
 APP_CONFIG = "config.json"
-IMAGE_FILE = "controllers.png"
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+IMAGE_FILE = get_resource_path("controllers.png")
+ICON_FILE = get_resource_path("george.ico")
 
 COLORS = {
     "bg": "#0f0f0f",
@@ -35,9 +46,10 @@ class VisualConfigurator:
         self.root.geometry("850x800")
         self.root.configure(bg=COLORS["bg"])
         
-        if os.path.exists("george.ico"):
+        # Set Icon
+        if os.path.exists(ICON_FILE):
             try:
-                self.root.iconbitmap("george.ico")
+                self.root.iconbitmap(ICON_FILE)
             except: pass
         
         self.haptic_val = tk.DoubleVar(value=1.4)
@@ -122,6 +134,7 @@ class VisualConfigurator:
                             btn = key[4:]
                             if btn in self.mappings:
                                 self.mappings[btn].set(val)
+            
         except: pass
 
     def save_config(self):
@@ -133,6 +146,7 @@ class VisualConfigurator:
                 f"StickRemapMode = {self.stick_mode.get()}\n",
                 "\n# Button & Analog Mappings\n"
             ]
+            
             for name, var in self.mappings.items():
                 target = var.get()
                 lines.append(f"Map_{name} = {target}\n")

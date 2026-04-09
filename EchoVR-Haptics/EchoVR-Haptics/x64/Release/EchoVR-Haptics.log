@@ -3,8 +3,8 @@
 x64\Release\dllmain.obj : warning LNK4042: object specified more than once; extras ignored
      Creating library C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.lib and object C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.exp
   Generating code
-  35 of 690 functions ( 5.1%) were compiled, the rest were copied from previous compilation.
-    4 functions were new in current compilation
-    6 functions had inline decision re-evaluated but remain unchanged
+  4 of 690 functions ( 0.6%) were compiled, the rest were copied from previous compilation.
+    2 functions were new in current compilation
+    1 functions had inline decision re-evaluated but remain unchanged
   Finished generating code
   EchoVR-Haptics.vcxproj -> C:\Users\lucas\Desktop\EchoVR-Haptics-main\EchoVR-Haptics\x64\Release\EchoVR-Haptics.dll
